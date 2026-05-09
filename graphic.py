@@ -1,29 +1,45 @@
 from PIL import Image, ImageDraw, ImageFont
 import io
+from datetime import datetime
 
-BG          = (18, 18, 18)
-ROW_BG      = (24, 24, 24)
-ROW_ALT     = (20, 20, 20)
-GOLD        = (212, 175, 55)
-WHITE       = (255, 255, 255)
-GREY        = (160, 160, 160)
-DIM         = (100, 100, 100)
-GREEN_BG    = (30, 90, 40)
-GREEN_FG    = (72, 199, 100)
-RED_BG      = (100, 28, 28)
-RED_FG      = (220, 80, 80)
-AMBER_BG    = (90, 65, 10)
-AMBER_FG    = (212, 175, 55)
-BAR_GREEN   = (72, 199, 100)
-BAR_RED     = (220, 80, 80)
-BAR_AMBER   = (212, 175, 55)
+# ── Colours ──────────────────────────────────────────────────────────────────
+BG        = (18, 18, 18)
+ROW_BG    = (24, 24, 24)
+ROW_ALT   = (20, 20, 20)
+GOLD      = (212, 175, 55)
+WHITE     = (255, 255, 255)
+GREY      = (160, 160, 160)
+DIM       = (100, 100, 100)
+GREEN_BG  = (30, 90, 40)
+GREEN_FG  = (72, 199, 100)
+RED_BG    = (100, 28, 28)
+RED_FG    = (220, 80, 80)
+AMBER_BG  = (90, 65, 10)
+AMBER_FG  = (212, 175, 55)
+BAR_GREEN = (72, 199, 100)
+BAR_RED   = (220, 80, 80)
+BAR_AMBER = (212, 175, 55)
 
-W           = 1400
-PAD         = 48
-ROW_H       = 110
-HEADER_H    = 130
-FOOTER_H    = 160
-BAR_W       = 7
+# ── Layout ───────────────────────────────────────────────────────────────────
+W        = 1400
+PAD      = 48
+ROW_H    = 110
+HEADER_H = 130
+FOOTER_H = 160
+BAR_W    = 7
+
+# Analyst order
+ANALYST_ORDER = ['fifi', 'clark', 'braamski', 'tony', 'zeph', 'vinny', 'bigmac']
+
+ANALYST_LABELS = {
+    'fifi':     'FIFI',
+    'clark':    'CLARK',
+    'braamski': 'BRAAMSKI',
+    'tony':     'TONY',
+    'zeph':     'ZEPH',
+    'vinny':    'VINNY',
+    'bigmac':   'BIGMAC',
+}
 
 
 def _font(size, bold=False):
@@ -39,166 +55,185 @@ def _font(size, bold=False):
     return ImageFont.load_default()
 
 
-def _badge(draw, x, y, text, fg, bg, min_w=110):
-    f = _font(22, bold=True)
-    tw = draw.textlength(text, font=f)
-    bw = max(tw + 28, min_w)
-    bh = 40
-    draw.rounded_rectangle([x, y, x + bw, y + bh], radius=8, fill=bg, outline=fg, width=2)
-    draw.text((x + (bw - tw) // 2, y + 8), text, font=f, fill=fg)
-    return int(bw)
+def _badge(draw, cx, cy, text, fg, bg, font, pad_x=22, pad_y=10, radius=18, outline=True):
+    """Draw a rounded-rectangle badge centred at (cx, cy)."""
+    tw = draw.textlength(text, font=font)
+    th = font.size
+    bw = tw + pad_x * 2
+    bh = th + pad_y * 2
+    x0 = cx - bw // 2
+    y0 = cy - bh // 2
+    x1 = x0 + bw
+    y1 = y0 + bh
+    draw.rounded_rectangle([x0, y0, x1, y1], radius=radius, fill=bg,
+                           outline=fg if outline else None, width=2)
+    draw.text((x0 + pad_x, y0 + pad_y), text, font=font, fill=fg)
+    return bw
 
 
-def _status_colors(status):
-    s = (status or '').upper()
-    if 'TRIM' in s:
-        return AMBER_FG, AMBER_BG
-    if 'CLOSE' in s:
-        return GREEN_FG, GREEN_BG
-    return (160, 160, 160), (40, 40, 40)
+def _row_color(status, pnl):
+    """Return (bar_color, status_fg, status_bg, pnl_fg, pnl_bg) for a trade row."""
+    pnl_val = 0
+    try:
+        pnl_val = float(pnl.replace('%', '').replace('+', ''))
+    except Exception:
+        pass
+
+    if status == 'Trimmed':
+        return BAR_AMBER, AMBER_FG, AMBER_BG, AMBER_FG, AMBER_BG
+    elif pnl_val < 0:
+        return BAR_RED, RED_FG, RED_BG, RED_FG, RED_BG
+    else:
+        return BAR_GREEN, GREEN_FG, GREEN_BG, GREEN_FG, GREEN_BG
 
 
-def _pnl_colors(pnl):
-    if pnl.startswith('+'):
-        return GREEN_FG, GREEN_BG
-    if pnl.startswith('-'):
-        return RED_FG, RED_BG
-    return (160, 160, 160), (40, 40, 40)
+def _flatten_trades(data):
+    """Return ordered list of (analyst_key, trade_dict) skipping analysts with no trades."""
+    rows = []
+    for key in ANALYST_ORDER:
+        trades = data.get(key, {}).get('trades', [])
+        for t in trades:
+            rows.append((key, t))
+    # include analysts not in order list
+    for key in data:
+        if key not in ANALYST_ORDER:
+            for t in data[key].get('trades', []):
+                rows.append((key, t))
+    return rows
 
 
 def build_graphic(data: dict, trade_of_day: dict, date_str: str) -> bytes:
-    ORDER = ['fifi', 'clark', 'braamski', 'tony', 'zeph', 'vinny', 'bigmac']
-    NAMES = {
-        'fifi': 'FIFI', 'clark': 'CLARK', 'braamski': 'BRAAMSKI',
-        'tony': 'TONY', 'zeph': 'ZEPH', 'vinny': 'VINNY', 'bigmac': 'BIGMAC',
-    }
+    rows = _flatten_trades(data)
+    n_rows = max(len(rows), 1)
 
-    rows = []
-    for key in ORDER:
-        analyst_data = data.get(key, {})
-        for trade in analyst_data.get('trades', []):
-            rows.append({
-                'analyst': NAMES.get(key, key.upper()),
-                'ticker':  trade.get('ticker', ''),
-                'strike':  trade.get('strike', ''),
-                'expiry':  trade.get('expiry', ''),
-                'price':   trade.get('price', ''),
-                'pnl':     trade.get('pnl', ''),
-                'status':  trade.get('status', 'Closed'),
-            })
-
-    wins   = sum(1 for r in rows if r['pnl'].startswith('+'))
-    losses = sum(1 for r in rows if r['pnl'].startswith('-'))
-    total  = len(rows)
-    vals = []
-    for r in rows:
-        try:
-            vals.append(float(r['pnl'].replace('+', '').replace('%', '')))
-        except Exception:
-            pass
-    if vals:
-        avg_num = sum(vals) / len(vals)
-        avg = ('+' if avg_num >= 0 else '') + f'{avg_num:.0f}%'
-    else:
-        avg = 'N/A'
-
-    H = HEADER_H + len(rows) * ROW_H + FOOTER_H + 20
+    H = HEADER_H + n_rows * ROW_H + FOOTER_H + 20
     img = Image.new('RGB', (W, H), BG)
     draw = ImageDraw.Draw(img)
 
-    # Gold border lines
-    draw.line([(0, 4), (W, 4)], fill=GOLD, width=4)
-    draw.line([(0, H - 4), (W, H - 4)], fill=GOLD, width=4)
+    # ── Gold border lines ─────────────────────────────────────────────────
+    draw.rectangle([0, 0, W - 1, 4], fill=GOLD)
+    draw.rectangle([0, H - 4, W - 1, H - 1], fill=GOLD)
 
-    # Header
-    h1 = _font(58, bold=True)
-    h2 = _font(28)
-    title = "FiFi's TQE — Daily Trade Recap"
-    tw = draw.textlength(title, font=h1)
-    draw.text(((W - tw) // 2, 18), title, font=h1, fill=WHITE)
-    sub = date_str + '  •  EOD Summary  •  Trimmed & Closed Only'
-    sw = draw.textlength(sub, font=h2)
-    draw.text(((W - sw) // 2, 84), sub, font=h2, fill=GOLD)
-    draw.line([(PAD, HEADER_H + 6), (W - PAD, HEADER_H + 6)], fill=GOLD, width=2)
+    # ── Header ────────────────────────────────────────────────────────────
+    title_f  = _font(52, bold=True)
+    sub_f    = _font(26)
+    title    = "FiFi's TQE \u2014 Daily Trade Recap"
+    subtitle = f'{date_str}  \u2022  EOD Summary  \u2022  Trimmed & Closed Only'
+    tw = draw.textlength(title, font=title_f)
+    sw = draw.textlength(subtitle, font=sub_f)
+    draw.text(((W - tw) // 2, 18), title, font=title_f, fill=WHITE)
+    draw.text(((W - sw) // 2, 82), subtitle, font=sub_f, fill=GOLD)
+    # thin gold rule below header
+    draw.rectangle([PAD, HEADER_H - 4, W - PAD, HEADER_H - 2], fill=GOLD)
 
-    # Trade rows
-    for i, row in enumerate(rows):
-        ry = HEADER_H + 14 + i * ROW_H
-        bg_col = ROW_BG if i % 2 == 0 else ROW_ALT
-        draw.rectangle([0, ry, W, ry + ROW_H], fill=bg_col)
+    # ── Trade rows ────────────────────────────────────────────────────────
+    analyst_f = _font(24)
+    ticker_f  = _font(54, bold=True)
+    detail_f  = _font(26)
+    price_f   = _font(26)
+    badge_sf  = _font(22, bold=True)   # status badge font
+    badge_pf  = _font(28, bold=True)   # pnl badge font
 
-        status_fg, _ = _status_colors(row['status'])
-        draw.rectangle([0, ry + 6, BAR_W, ry + ROW_H - 6], fill=status_fg)
+    badge_area_w = 340   # right-side area reserved for two badges
+    content_right = W - PAD - badge_area_w
 
-        af = _font(20)
-        draw.text((PAD, ry + 10), row['analyst'], font=af, fill=GREY)
+    for i, (analyst_key, trade) in enumerate(rows):
+        y0 = HEADER_H + i * ROW_H
+        y1 = y0 + ROW_H
+        row_bg = ROW_BG if i % 2 == 0 else ROW_ALT
+        draw.rectangle([0, y0, W - 1, y1 - 1], fill=row_bg)
 
-        tf = _font(44, bold=True)
-        draw.text((PAD, ry + 34), row['ticker'], font=tf, fill=WHITE)
+        ticker = trade.get('ticker', '')
+        strike = trade.get('strike', '')
+        expiry = trade.get('expiry', '')
+        price  = trade.get('price', '')
+        pnl    = trade.get('pnl', '')
+        status = trade.get('status', 'Closed')
 
-        detail = (row['expiry'] + ' ' + row['strike']).strip()
-        df = _font(28)
-        ticker_w = int(draw.textlength(row['ticker'], font=tf))
-        draw.text((PAD + ticker_w + 20, ry + 50), detail, font=df, fill=GREY)
+        bar_col, st_fg, st_bg, pnl_fg, pnl_bg = _row_color(status, pnl)
 
-        if row.get('price'):
-            raw = row['price']
-            if '->' in raw:
-                p = raw.split('->')
-                price_str = '$' + p[0].strip() + ' → $' + p[1].strip()
-            elif '→' in raw:
-                p = raw.split('→')
-                price_str = '$' + p[0].strip() + ' → $' + p[1].strip()
-            else:
-                price_str = raw
-            pf2 = _font(26)
-            px = W // 2 - 60
-            draw.text((px, ry + 40), price_str, font=pf2, fill=GREY)
+        # left colour bar
+        draw.rectangle([0, y0, BAR_W, y1 - 1], fill=bar_col)
 
-        pnl_text = row['pnl']
-        st_text  = (row['status'] or 'CLOSED').upper()
-        st_fg, st_bg   = _status_colors(st_text)
-        pnl_fg, pnl_bg = _pnl_colors(pnl_text)
+        row_mid = y0 + ROW_H // 2
 
-        badge_y = ry + (ROW_H - 40) // 2
-        pnl_w   = max(int(draw.textlength(pnl_text, font=_font(22, bold=True))) + 28, 110)
-        st_w    = max(int(draw.textlength(st_text,  font=_font(22, bold=True))) + 28, 130)
+        # analyst label (small, grey, above ticker)
+        alabel = ANALYST_LABELS.get(analyst_key, analyst_key.upper())
+        draw.text((PAD + BAR_W + 6, y0 + 8), alabel, font=analyst_f, fill=GREY)
 
-        pnl_x = W - PAD - pnl_w
-        st_x  = pnl_x - st_w - 16
+        # ticker (large bold)
+        draw.text((PAD + BAR_W + 6, y0 + 32), ticker, font=ticker_f, fill=WHITE)
 
-        _badge(draw, pnl_x, badge_y, pnl_text, pnl_fg, pnl_bg, pnl_w)
-        _badge(draw, st_x,  badge_y, st_text,  st_fg,  st_bg,  st_w)
+        # strike + expiry (detail line, right of ticker)
+        ticker_w = draw.textlength(ticker, font=ticker_f)
+        detail_x = PAD + BAR_W + 6 + ticker_w + 24
+        detail   = f'{expiry} {strike}'
+        draw.text((detail_x, y0 + 50), detail, font=detail_f, fill=GREY)
 
-        draw.line([(PAD, ry + ROW_H - 1), (W - PAD, ry + ROW_H - 1)], fill=(40, 40, 40), width=1)
+        # price arrow: $entry → $exit  (only if price available)
+        if price:
+            try:
+                entry = float(price)
+                pnl_val = float(pnl.replace('%', '').replace('+', ''))
+                exit_p = round(entry * (1 + pnl_val / 100), 2)
+                price_str = f'${entry:.2f} \u2192 ${exit_p:.2f}'
+            except Exception:
+                price_str = f'${price}'
+            price_x = detail_x
+            draw.text((price_x, row_mid - 16), price_str, font=price_f, fill=GREY)
 
-    # Footer stats
-    fy = HEADER_H + 14 + len(rows) * ROW_H + 20
-    draw.line([(PAD, fy - 4), (W - PAD, fy - 4)], fill=(50, 50, 50), width=1)
+        # badges (right side)
+        pnl_badge_cx  = W - PAD - 80
+        stat_badge_cx = W - PAD - 80 - 170
+        badge_cy      = row_mid
 
-    avg_color = GREEN_FG if not avg.startswith('-') else RED_FG
+        # status badge
+        _badge(draw, stat_badge_cx, badge_cy, status.upper(), st_fg, st_bg, badge_sf)
+        # pnl badge
+        _badge(draw, pnl_badge_cx, badge_cy, pnl, pnl_fg, pnl_bg, badge_pf)
+
+    # ── Footer separator ──────────────────────────────────────────────────
+    footer_y = HEADER_H + n_rows * ROW_H
+    draw.rectangle([PAD, footer_y + 4, W - PAD, footer_y + 6], fill=GOLD)
+
+    # ── Stats row ─────────────────────────────────────────────────────────
+    all_pnls = []
+    for _, t in rows:
+        try:
+            all_pnls.append(float(t.get('pnl', '0').replace('%', '').replace('+', '')))
+        except Exception:
+            pass
+
+    wins   = sum(1 for v in all_pnls if v > 0)
+    losses = sum(1 for v in all_pnls if v < 0)
+    total  = len(all_pnls)
+    avg    = (sum(all_pnls) / total) if total else 0
+    avg_str = f'+{avg:.0f}%' if avg >= 0 else f'{avg:.0f}%'
+    avg_col = GREEN_FG if avg >= 0 else RED_FG
+
     stats = [
         ('TRADES TODAY', str(total), WHITE),
         ('WINS',         str(wins),  GREEN_FG),
         ('LOSSES',       str(losses), RED_FG),
-        ('AVG RETURN',   avg,        avg_color),
+        ('AVG RETURN',   avg_str,    avg_col),
     ]
-    col_w = W // len(stats)
-    lf = _font(22)
-    vf = _font(52, bold=True)
-    for ci, (label, value, color) in enumerate(stats):
-        cx = ci * col_w + col_w // 2
-        lw = int(draw.textlength(label, font=lf))
-        vw = int(draw.textlength(value, font=vf))
-        draw.text((cx - lw // 2, fy + 10), label, font=lf, fill=GREY)
-        draw.text((cx - vw // 2, fy + 40), value, font=vf, fill=color)
+    label_f = _font(22)
+    val_f   = _font(44, bold=True)
+    col_w   = (W - 2 * PAD) // 4
+    sy      = footer_y + 20
+    for ci, (lbl, val, col) in enumerate(stats):
+        cx = PAD + ci * col_w + col_w // 2
+        lw = draw.textlength(lbl, font=label_f)
+        vw = draw.textlength(val, font=val_f)
+        draw.text((cx - lw // 2, sy), lbl, font=label_f, fill=GREY)
+        draw.text((cx - vw // 2, sy + 30), val, font=val_f, fill=col)
 
-    cap = 'TQERecapBot  •  Auto-generated  •  Only Trimmed & Closed positions shown'
-    cf = _font(20)
-    cw = int(draw.textlength(cap, font=cf))
-    draw.text(((W - cw) // 2, fy + 110), cap, font=cf, fill=DIM)
+    # ── Caption ───────────────────────────────────────────────────────────
+    cap_f = _font(20)
+    cap   = 'TQERecapBot  \u2022  Auto-generated  \u2022  Only Trimmed & Closed positions shown'
+    cw    = draw.textlength(cap, font=cap_f)
+    draw.text(((W - cw) // 2, H - 38), cap, font=cap_f, fill=DIM)
 
     buf = io.BytesIO()
     img.save(buf, format='PNG')
-    buf.seek(0)
-    return buf.read()
+    return buf.getvalue()
