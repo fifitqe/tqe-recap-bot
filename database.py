@@ -52,8 +52,8 @@ def get_todays_closed_trimmed(today):
 def log_daily_recap(date, closed, trimmed, message_id):
     sb = get_client()
     sb.table("daily_recaps").insert({
-        "date": date,
-        "closed_count": closed,
-        "trimmed_count": trimmed,
+        "recap_date": date,
+        "trades_closed": closed,
+        "trades_trimmed": trimmed,
         "message_id": message_id,
     }).execute()
