@@ -10,12 +10,12 @@ from graphic import build_graphic
 ET = pytz.timezone('America/New_York')
 
 SAMPLE_TRADES = [
-    {'analyst': 'fifi',    'ticker': 'SPY',  'strike': '580C', 'expiry': '5/9',  'price': '2.45', 'pnl': '+67%',  'status': 'Closed'},
-    {'analyst': 'clark',   'ticker': 'NVDA', 'strike': '870P', 'expiry': '5/9',  'price': '1.80', 'pnl': '+100%', 'status': 'Closed'},
-    {'analyst': 'braamski','ticker': 'AAPL', 'strike': '195C', 'expiry': '5/16', 'price': '3.20', 'pnl': '+50%',  'status': 'Trimmed'},
-    {'analyst': 'tony',    'ticker': 'QQQ',  'strike': '470P', 'expiry': '5/9',  'price': '0.95', 'pnl': '+95%',  'status': 'Closed'},
-    {'analyst': 'zeph',    'ticker': 'META', 'strike': '550C', 'expiry': '5/16', 'price': '5.50', 'pnl': '-24%',  'status': 'Closed'},
-    {'analyst': 'bigmac',  'ticker': 'TSLA', 'strike': '265C', 'expiry': '5/9',  'price': '2.10', 'pnl': '+86%',  'status': 'Closed'},
+    {'analyst': 'fifi',     'ticker': 'SPY',  'strike': '580C',  'expiry': '5/9',  'price': '2.45', 'pnl': '+67%',  'status': 'Closed'},
+    {'analyst': 'clark',    'ticker': 'NVDA',  'strike': '870P',  'expiry': '5/9',  'price': '1.80', 'pnl': '+100%', 'status': 'Closed'},
+    {'analyst': 'braamski', 'ticker': 'AAPL',  'strike': '195C',  'expiry': '5/16', 'price': '3.20', 'pnl': '+50%',  'status': 'Trimmed'},
+    {'analyst': 'tony',     'ticker': 'QQQ',   'strike': '470P',  'expiry': '5/9',  'price': '0.95', 'pnl': '+95%',  'status': 'Closed'},
+    {'analyst': 'zeph',     'ticker': 'META',  'strike': '550C',  'expiry': '5/16', 'price': '5.50', 'pnl': '-24%',  'status': 'Closed'},
+    {'analyst': 'bigmac',   'ticker': 'TSLA',  'strike': '265C',  'expiry': '5/9',  'price': '2.10', 'pnl': '+86%',  'status': 'Closed'},
 ]
 
 
@@ -26,11 +26,21 @@ def _build_graphic_data(trades, today):
         ticker  = t.get('ticker', '')
         strike  = t.get('strike', '')
         expiry  = t.get('expiry', '')
+        price   = t.get('price', '')
         pnl     = t.get('pnl', '')
+        status  = t.get('status', 'Closed')
         label   = f'${ticker} {strike} {expiry}'.strip()
         if analyst not in data:
             data[analyst] = {'trades': []}
-        data[analyst]['trades'].append({'label': label, 'pnl': pnl})
+        data[analyst]['trades'].append({
+            'label':  label,
+            'ticker': ticker,
+            'strike': strike,
+            'expiry': expiry,
+            'price':  price,
+            'pnl':    pnl,
+            'status': status,
+        })
 
     best = None
     best_val = -9999
@@ -50,8 +60,8 @@ def _build_graphic_data(trades, today):
         strike = best.get('strike', '')
         expiry = best.get('expiry', '')
         trade_of_day = {
-            'ticker': f'${ticker} {strike} {expiry}'.strip(),
-            'pnl': best.get('pnl', ''),
+            'ticker':  f'${ticker} {strike} {expiry}'.strip(),
+            'pnl':     best.get('pnl', ''),
             'analyst': best.get('analyst', ''),
         }
 
@@ -85,7 +95,7 @@ async def run_eod(bot, today=None, trades=None):
         return
 
     file = discord.File(io.BytesIO(img_bytes), filename=f'recap_{today}.png')
-    msg  = await channel.send(
+    msg = await channel.send(
         content=f'**Daily Trade Recap -- {today}**',
         file=file,
     )
