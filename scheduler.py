@@ -20,7 +20,6 @@ SAMPLE_TRADES = [
 
 
 def _build_graphic_data(trades, today):
-    """Convert flat trades list to the keyed data dict build_graphic expects."""
     data = {}
     for t in trades:
         analyst = t.get('analyst', 'unknown')
@@ -33,7 +32,6 @@ def _build_graphic_data(trades, today):
             data[analyst] = {'trades': []}
         data[analyst]['trades'].append({'label': label, 'pnl': pnl})
 
-    # Pick trade of the day: highest positive pnl
     best = None
     best_val = -9999
     for t in trades:
@@ -57,7 +55,6 @@ def _build_graphic_data(trades, today):
             'analyst': best.get('analyst', ''),
         }
 
-    # Format date nicely
     try:
         dt = datetime.strptime(today, '%Y-%m-%d')
         date_str = dt.strftime('%a, %b %-d, %Y')
@@ -109,7 +106,7 @@ async def eod_scheduler(bot):
         fire_et = now_et.replace(hour=EOD_HOUR, minute=EOD_MINUTE, second=0, microsecond=0)
         if now_et >= fire_et:
             fire_et = fire_et + timedelta(days=1)
-        wait_secs = (fire_et - now_et).total_seconds()
-        print(f'[Scheduler] Next recap in {wait_secs/3600:.1f}h')
-        await asyncio.sleep(wait_secs)
+        wait_s = (fire_et - now_et).total_seconds()
+        print(f'[Scheduler] Next EOD in {wait_s/3600:.1f}h')
+        await asyncio.sleep(wait_s)
         await run_eod(bot)
