@@ -1,10 +1,10 @@
 import asyncio
 import discord
 from discord.ext import commands
-from config import CHANNEL_ID_TO_ANALYST
+from config import CHANNEL_ID_TO_ANALYST, RECAP_CHANNEL_ID
 from parser import route_message
 from database import log_trade
-from scheduler import eod_scheduler
+from scheduler import eod_scheduler, run_eod
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -19,10 +19,22 @@ async def on_ready():
     print(f"[Bot] Watching {len(CHANNEL_ID_TO_ANALYST)} channels")
     asyncio.create_task(eod_scheduler(bot))
 
+@bot.command(name="recap")
+async def manual_recap(ctx):
+    """Manually trigger the EOD recap graphic."""
+    await ctx.message.add_reaction("⏳")
+    try:
+        await run_eod(bot)
+        await ctx.message.add_reaction("✅")
+    except Exception as e:
+        await ctx.send(f"❌ Recap failed: {e}")
+        print(f"[Bot] Manual recap error: {e}")
+
 @bot.event
 async def on_message(message: discord.Message):
     analyst = CHANNEL_ID_TO_ANALYST.get(message.channel.id)
     if not analyst:
+        await bot.process_commands(message)
         return
     if message.author.bot and analyst != "bigmac":
         return
