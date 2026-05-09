@@ -14,8 +14,8 @@ RED         = (210, 80, 70)
 GREY        = (120, 115, 95)
 ACCENT_LINE = (100, 90, 50)
 
-W           = 880
-SIDE_PAD    = 22
+W        = 880
+SIDE_PAD = 22
 
 def _font(size, bold=False):
     paths = [
@@ -29,13 +29,21 @@ def _font(size, bold=False):
             pass
     return ImageFont.load_default()
 
-def _price_str(price):
-    if price is None:
-        return ''
+def _pnl_color_str(pnl_raw):
+    """Return (display_str, color) for a pnl value like '+67%' or '-24%'."""
+    if not pnl_raw:
+        return '', GREY
+    s = str(pnl_raw).strip()
     try:
-        return f'${float(price):.2f}'
-    except (ValueError, TypeError):
-        return f'${price}'
+        val = float(s.replace('%','').replace('+',''))
+        color = GREEN if val >= 0 else RED
+    except Exception:
+        color = GREY
+    if not s.startswith(('+','-')):
+        s = ('+' if color == GREEN else '') + s
+    if not s.endswith('%'):
+        s = s + '%'
+    return s, color
 
 def _section_label(draw, y, text, font):
     draw.text((SIDE_PAD, y), text, font=font, fill=TAN)
@@ -52,12 +60,13 @@ def build_graphic(trades: list, trade_date: str) -> bytes:
     ANALYST_GROUP = ['clark', 'braamski']
     TRUSTED_GROUP = ['tony', 'zeph', 'vinny', 'bigmac']
 
+    # Best trade = highest pnl%
     best_trade = None
     best_pct   = -9999
     for t in trades:
+        pnl_raw = t.get('pnl') or ''
         try:
-            raw = str(t.get('pnl') or t.get('price') or '0')
-            pct = float(raw.replace('%','').replace('+','').replace('$',''))
+            pct = float(str(pnl_raw).replace('%','').replace('+',''))
             if pct > best_pct:
                 best_pct   = pct
                 best_trade = t
@@ -86,12 +95,13 @@ def build_graphic(trades: list, trade_date: str) -> bytes:
         rows = max(len(by_analyst.get(analyst, [])), 1)
         return ANALYST_HEADER_H + rows * ROW_H + CARD_PAD
 
-    total_h = HEADER_H + 12 + HERO_H + 16
     SECTIONS = [
         ("FIFI'S PLAYGROUND", FIFI_GROUP),
         ('ANALYSTS',          ANALYST_GROUP),
         ('TRUSTED TRADERS',   TRUSTED_GROUP),
     ]
+
+    total_h = HEADER_H + 12 + HERO_H + 16
     for _, group in SECTIONS:
         total_h += SECTION_H + 6
         for a in group:
@@ -142,20 +152,16 @@ def build_graphic(trades: list, trade_date: str) -> bytes:
     if best_trade:
         tk = '$' + (best_trade.get('ticker') or 'N/A').upper()
         an = DISPLAY_NAMES.get(best_trade.get('analyst',''), best_trade.get('analyst','').capitalize())
-        try:
-            pct_str = ('+' if best_pct >= 0 else '') + f'{best_pct:.0f}%'
-        except Exception:
-            pct_str = ''
-        pct_color = GREEN if best_pct >= 0 else RED
+        pnl_s, pnl_c = _pnl_color_str(best_trade.get('pnl'))
         draw.text((hx0 + 36, y + 22), tk, font=f_hero_t, fill=GOLD)
-        pw = int(f_hero_p.getlength(pct_str))
-        draw.text((hx1 - pw - 14, y + 28), pct_str, font=f_hero_p, fill=pct_color)
+        pw = int(f_hero_p.getlength(pnl_s))
+        draw.text((hx1 - pw - 14, y + 28), pnl_s, font=f_hero_p, fill=pnl_c)
         draw.text((hx0 + 38, y + 66), an, font=f_hero_u, fill=GREY)
     else:
         draw.text((hx0 + 12, y + 35), 'No trades today', font=f_aname, fill=GREY)
     y += HERO_H + 16
 
-    # Analyst card helper
+    # Analyst card
     def draw_card(analyst, y_start):
         trades_list = by_analyst.get(analyst, [])
         rows = max(len(trades_list), 1)
@@ -170,26 +176,25 @@ def build_graphic(trades: list, trade_date: str) -> bytes:
             draw.text((cx0 + 12, ry + 8), 'No trades', font=f_ticker, fill=GREY)
         else:
             for t in trades_list:
-                price   = t.get('price')
-                price_s = _price_str(price)
+                pnl_raw  = t.get('pnl') or ''
+                pnl_s, pnl_c = _pnl_color_str(pnl_raw)
                 ticker_s = '$' + (t.get('ticker') or '---').upper()
                 strike_s = t.get('strike') or ''
                 expiry_s = t.get('expiry') or ''
                 detail   = ticker_s
                 if strike_s: detail += '  ' + strike_s
                 if expiry_s: detail += '  ' + expiry_s
-                status   = t.get('status', '')
+                status    = t.get('status', '')
                 dot_color = GREEN if status == 'Closed' else RED
                 dx, dy = cx0 + 14, ry + ROW_H // 2 - 5
                 draw.ellipse([(dx, dy), (dx + 10, dy + 10)], fill=dot_color)
                 draw.text((cx0 + 30, ry + 8), detail, font=f_ticker, fill=WHITE)
-                if price_s:
-                    pw2 = int(f_pct.getlength(price_s))
-                    draw.text((cx1 - pw2 - 12, ry + 8), price_s, font=f_pct, fill=dot_color)
+                if pnl_s:
+                    pw2 = int(f_pct.getlength(pnl_s))
+                    draw.text((cx1 - pw2 - 12, ry + 8), pnl_s, font=f_pct, fill=pnl_c)
                 ry += ROW_H
         return ch
 
-    # Sections
     for sec_name, group in SECTIONS:
         _section_label(draw, y, sec_name, f_sec)
         y += SECTION_H + 4
@@ -203,7 +208,7 @@ def build_graphic(trades: list, trade_date: str) -> bytes:
     draw.line([(0, y), (W, y)], fill=ACCENT_LINE, width=1)
     y += 8
     draw.text((SIDE_PAD, y + 8), 'x.com/badgirlfifi_tqe', font=f_footer, fill=GREY)
-    fr = '@Badgirlfi_trading'
+    fr  = '@Badgirlfi_trading'
     frw = int(f_footer.getlength(fr))
     draw.text((W - SIDE_PAD - frw, y + 8), fr, font=f_footer, fill=GREY)
 
