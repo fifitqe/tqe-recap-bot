@@ -4,7 +4,7 @@ from discord.ext import commands
 from config import CHANNEL_ID_TO_ANALYST
 from parser import route_message
 from database import log_trade
-from scheduler import eod_scheduler, run_eod
+from scheduler import eod_scheduler, run_eod, run_test_eod
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -21,7 +21,7 @@ async def on_ready():
 
 @bot.command(name="recap")
 async def manual_recap(ctx):
-    """Manually trigger the EOD recap graphic."""
+    """Manually trigger the EOD recap from real Supabase data."""
     await ctx.message.add_reaction("⏳")
     try:
         await run_eod(bot)
@@ -29,6 +29,17 @@ async def manual_recap(ctx):
     except Exception as e:
         await ctx.send(f"❌ Recap failed: {e}")
         print(f"[Bot] Manual recap error: {e}")
+
+@bot.command(name="testrecap")
+async def test_recap(ctx):
+    """Post a test recap graphic with sample trades to #daily-trade-recaps."""
+    await ctx.message.add_reaction("⏳")
+    try:
+        await run_test_eod(bot)
+        await ctx.message.add_reaction("✅")
+    except Exception as e:
+        await ctx.send(f"❌ Test recap failed: {e}")
+        print(f"[Bot] Test recap error: {e}")
 
 @bot.event
 async def on_message(message: discord.Message):
