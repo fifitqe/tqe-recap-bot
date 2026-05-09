@@ -1,7 +1,7 @@
 import asyncio
 import discord
 from discord.ext import commands
-from config import CHANNEL_ID_TO_ANALYST, RECAP_CHANNEL_ID
+from config import CHANNEL_ID_TO_ANALYST
 from parser import route_message
 from database import log_trade
 from scheduler import eod_scheduler, run_eod
