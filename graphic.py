@@ -23,19 +23,19 @@ FIFI_GROUP    = ['fifi']
 ANALYST_GROUP = ['clark', 'braamski']
 TRUSTED_GROUP = ['tony', 'zeph', 'vinny', 'bigmac']
 
-# Canvas dimensions - wider for readability
-W = 900
-PAD = 32
-CARD_PAD = 20
-RADIUS = 12
+# Canvas — tall font needs more room
+W         = 1000
+PAD       = 36
+CARD_PAD  = 24
+RADIUS    = 14
 
-# Heights
-ROW_H = 44
-ANALYST_H = 56
-SECTION_H = 36
-HEADER_H = 90
-HERO_H = 110
-FOOTER_H = 48
+# Row / section heights scaled for large fonts
+ROW_H      = 56
+ANALYST_H  = 70
+SECTION_H  = 44
+HEADER_H   = 110
+HERO_H     = 140
+FOOTER_H   = 56
 
 
 def _font(size, bold=False):
@@ -56,7 +56,7 @@ def _section_height(members, data):
     for m in members:
         trades = data.get(m, {}).get('trades', [])
         rows = max(1, len(trades))
-        h += ANALYST_H + rows * ROW_H + CARD_PAD + 16
+        h += ANALYST_H + rows * ROW_H + CARD_PAD + 20
     return h
 
 
@@ -76,12 +76,12 @@ def _draw_rounded_rect(draw, xy, radius, fill, outline=None, width=1):
 
 
 def _draw_section_label(draw, y, label, fw, fh):
-    lf = _font(13)
+    lf = _font(15)
     lw = draw.textlength(label, font=lf)
     line_y = y + SECTION_H // 2
-    draw.line([(PAD, line_y), (PAD + 24, line_y)], fill=DIVIDER, width=1)
-    draw.text((PAD + 30, y + (SECTION_H - 14) // 2), label, font=lf, fill=MUTED)
-    right_start = PAD + 30 + lw + 12
+    draw.line([(PAD, line_y), (PAD + 28, line_y)], fill=DIVIDER, width=1)
+    draw.text((PAD + 36, y + (SECTION_H - 16) // 2), label, font=lf, fill=MUTED)
+    right_start = PAD + 36 + lw + 14
     draw.line([(right_start, line_y), (W - PAD, line_y)], fill=DIVIDER, width=1)
     return y + SECTION_H
 
@@ -93,12 +93,12 @@ def _draw_analyst_card(draw, y, key, analyst_data):
     _draw_rounded_rect(draw, (PAD, y, W - PAD, y + card_h), RADIUS, CARD_BG, BORDER, 1)
 
     name = DISPLAY_NAMES.get(key, key)
-    nf = _font(18, bold=True)
-    draw.text((PAD + CARD_PAD, y + (ANALYST_H - 20) // 2), name, font=nf, fill=GOLD)
+    nf = _font(22, bold=True)
+    draw.text((PAD + CARD_PAD, y + (ANALYST_H - 24) // 2), name, font=nf, fill=GOLD)
 
     if not trades:
-        nof = _font(14)
-        draw.text((PAD + CARD_PAD, y + ANALYST_H + (ROW_H - 16) // 2), 'No trades', font=nof, fill=MUTED)
+        nof = _font(17)
+        draw.text((PAD + CARD_PAD, y + ANALYST_H + (ROW_H - 19) // 2), 'No trades', font=nof, fill=MUTED)
     else:
         for i, trade in enumerate(trades):
             ry = y + ANALYST_H + i * ROW_H
@@ -106,20 +106,20 @@ def _draw_analyst_card(draw, y, key, analyst_data):
                 draw.line([(PAD + CARD_PAD, ry), (W - PAD - CARD_PAD, ry)], fill=DIVIDER, width=1)
             pnl_val = trade.get('pnl', '')
             dot_color = GREEN if pnl_val.startswith('+') or pnl_val == '' else RED
-            dot_r = 6
+            dot_r = 7
             dot_cx = PAD + CARD_PAD + dot_r
             dot_cy = ry + ROW_H // 2
             draw.ellipse([(dot_cx - dot_r, dot_cy - dot_r), (dot_cx + dot_r, dot_cy + dot_r)], fill=dot_color)
-            tf = _font(14)
+            tf = _font(17)
             label = trade.get('label', '')
-            draw.text((PAD + CARD_PAD + dot_r * 2 + 8, ry + (ROW_H - 16) // 2), label, font=tf, fill=LIGHT)
+            draw.text((PAD + CARD_PAD + dot_r * 2 + 10, ry + (ROW_H - 19) // 2), label, font=tf, fill=LIGHT)
             if pnl_val:
-                pf = _font(14, bold=True)
+                pf = _font(17, bold=True)
                 pc = GREEN if pnl_val.startswith('+') else RED
                 pw = draw.textlength(pnl_val, font=pf)
-                draw.text((W - PAD - CARD_PAD - pw, ry + (ROW_H - 16) // 2), pnl_val, font=pf, fill=pc)
+                draw.text((W - PAD - CARD_PAD - pw, ry + (ROW_H - 19) // 2), pnl_val, font=pf, fill=pc)
 
-    return y + card_h + 16
+    return y + card_h + 20
 
 
 def build_graphic(data: dict, trade_of_day: dict, date_str: str) -> bytes:
@@ -128,18 +128,18 @@ def build_graphic(data: dict, trade_of_day: dict, date_str: str) -> bytes:
     draw = ImageDraw.Draw(img)
 
     # ── Header ──────────────────────────────────────────────
-    hf = _font(26, bold=True)
-    sf = _font(14)
-    draw.text((PAD, 18), "FiFi's TQE", font=hf, fill=GOLD)
-    draw.text((PAD, 52), 'Daily Trade Recap', font=sf, fill=MUTED)
+    hf = _font(34, bold=True)
+    sf = _font(18)
+    draw.text((PAD, 20), "FiFi's TQE", font=hf, fill=GOLD)
+    draw.text((PAD, 62), 'Daily Trade Recap', font=sf, fill=MUTED)
 
-    df_label = _font(11)
-    df_date  = _font(16, bold=True)
-    date_w = draw.textlength(date_str, font=df_date)
+    df_label = _font(13)
+    df_date  = _font(20, bold=True)
+    date_w  = draw.textlength(date_str, font=df_date)
     label_w = draw.textlength('DATE', font=df_label)
     right_x = W - PAD - max(date_w, label_w)
-    draw.text((right_x, 20), 'DATE', font=df_label, fill=MUTED)
-    draw.text((right_x, 36), date_str, font=df_date, fill=LIGHT)
+    draw.text((right_x, 24), 'DATE', font=df_label, fill=MUTED)
+    draw.text((right_x, 44), date_str, font=df_date, fill=LIGHT)
 
     draw.line([(PAD, HEADER_H - 1), (W - PAD, HEADER_H - 1)], fill=DIVIDER, width=1)
 
@@ -147,22 +147,22 @@ def build_graphic(data: dict, trade_of_day: dict, date_str: str) -> bytes:
 
     # ── Hero ────────────────────────────────────────────────
     _draw_rounded_rect(draw, (PAD, y, W - PAD, y + HERO_H), RADIUS, HERO_BG, BORDER, 1)
-    tlf = _font(11)
-    draw.text((PAD + CARD_PAD, y + 10), 'TRADE OF THE DAY', font=tlf, fill=MUTED)
+    tlf = _font(13)
+    draw.text((PAD + CARD_PAD, y + 12), 'TRADE OF THE DAY', font=tlf, fill=MUTED)
     if trade_of_day:
         ticker  = trade_of_day.get('ticker', '')
         pnl     = trade_of_day.get('pnl', '')
         analyst = trade_of_day.get('analyst', '')
-        tkf = _font(28, bold=True)
-        draw.text((PAD + CARD_PAD, y + 30), ticker, font=tkf, fill=GOLD)
+        tkf = _font(36, bold=True)
+        draw.text((PAD + CARD_PAD, y + 34), ticker, font=tkf, fill=GOLD)
         if pnl:
-            pf = _font(32, bold=True)
+            pf = _font(40, bold=True)
             pc = GREEN if pnl.startswith('+') else RED
             pw = draw.textlength(pnl, font=pf)
-            draw.text((W - PAD - CARD_PAD - pw, y + 28), pnl, font=pf, fill=pc)
+            draw.text((W - PAD - CARD_PAD - pw, y + 30), pnl, font=pf, fill=pc)
         if analyst:
-            af = _font(13)
-            draw.text((PAD + CARD_PAD, y + 72), analyst, font=af, fill=MUTED)
+            af = _font(16)
+            draw.text((PAD + CARD_PAD, y + 92), analyst, font=af, fill=MUTED)
     y += HERO_H + PAD
 
     # ── Fifi section ────────────────────────────────────────
@@ -184,10 +184,10 @@ def build_graphic(data: dict, trade_of_day: dict, date_str: str) -> bytes:
     y += PAD
 
     # ── Footer ──────────────────────────────────────────────
-    ff = _font(12)
-    draw.text((PAD, y + 16), 'x.com/badgirlfifi_tqe', font=ff, fill=MUTED)
+    ff = _font(14)
+    draw.text((PAD, y + 18), 'x.com/badgirlfifi_tqe', font=ff, fill=MUTED)
     rw = draw.textlength('@Badgirlfifi_trading', font=ff)
-    draw.text((W - PAD - rw, y + 16), '@Badgirlfifi_trading', font=ff, fill=MUTED)
+    draw.text((W - PAD - rw, y + 18), '@Badgirlfifi_trading', font=ff, fill=MUTED)
 
     buf = io.BytesIO()
     img.save(buf, format='PNG')
