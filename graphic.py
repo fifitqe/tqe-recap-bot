@@ -1,217 +1,278 @@
-from PIL import Image, ImageDraw, ImageFont
 import io
+from datetime import datetime
+from playwright.sync_api import sync_playwright
 
-# Palette matching FiFi TQE template
-BG          = (18, 17, 10)
-CARD_BG     = (24, 23, 14)
-HERO_BG     = (30, 28, 16)
-BORDER      = (180, 140, 40)
-GOLD        = (220, 175, 50)
-TAN         = (180, 160, 120)
-WHITE       = (240, 238, 225)
-GREEN       = (80, 200, 110)
-RED         = (210, 80, 70)
-GREY        = (120, 115, 95)
-ACCENT_LINE = (100, 90, 50)
+DISPLAY_NAMES = {
+        'fifi': 'BadGirlFiFi',
+        'clark': 'clark kent',
+        'braamski': 'Braamskis',
+        'tony': 'TonyD',
+        'zeph': 'ZephTrades',
+        'vinny': 'Vinny',
+        'bigmac': 'BigMac',
+}
 
-W        = 880
-SIDE_PAD = 22
+EMOJIS = {
+        'fifi': '💀',
+        'clark': '😤',
+        'braamski': '🔱',
+        'tony': '🤩',
+        'zeph': '😊',
+        'vinny': '🐐',
+        'bigmac': '🍔',
+}
 
-def _font(size, bold=False):
-    paths = [
-        '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf' if bold else '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-        '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf' if bold else '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
-    ]
-    for p in paths:
-        try:
-            return ImageFont.truetype(p, size)
-        except Exception:
-            pass
-    return ImageFont.load_default()
+FIFI_GROUP = ['fifi']
+ANALYST_GROUP = ['clark', 'braamski']
+TRUSTED_GROUP = ['tony', 'zeph', 'vinny', 'bigmac']
 
-def _pnl_color_str(pnl_raw):
-    """Return (display_str, color) for a pnl value like '+67%' or '-24%'."""
-    if not pnl_raw:
-        return '', GREY
-    s = str(pnl_raw).strip()
+def _pnl_str(pnl_raw):
+        if not pnl_raw:
+                    return '', False
+                s = str(pnl_raw).strip()
     try:
-        val = float(s.replace('%','').replace('+',''))
-        color = GREEN if val >= 0 else RED
-    except Exception:
-        color = GREY
-    if not s.startswith(('+','-')):
-        s = ('+' if color == GREEN else '') + s
-    if not s.endswith('%'):
-        s = s + '%'
-    return s, color
+                val = float(s.replace('%', '').replace('+', ''))
+                positive = val >= 0
+except Exception:
+        positive = True
+    if not s.startswith(('+', '-')):
+                s = '+' + s
+            if not s.endswith('%'):
+                        s = s + '%'
+                    return s, positive
 
-def _section_label(draw, y, text, font):
-    draw.text((SIDE_PAD, y), text, font=font, fill=TAN)
-    tw = int(font.getlength(text)) + 8
-    draw.line([(SIDE_PAD + tw, y + 7), (W - SIDE_PAD, y + 7)], fill=ACCENT_LINE, width=1)
+def _trade_rows(trades):
+        html = ''
+    for t in trades:
+                ticker = t.get('ticker', '')
+                strike = t.get('strike', '')
+                expiry = t.get('expiry', '')
+                pnl_raw = t.get('pnl') or t.get('pnl_pct') or ''
+                pnl_str, positive = _pnl_str(pnl_raw)
+                label = f'${ticker}'
+                if strike:
+                                label += f' {strike}'
+                            if expiry:
+                                            label += f' {expiry}'
+                                        dot_color = '#4ade80' if positive else '#f87171'
+        pnl_color = '#4ade80' if positive else '#f87171'
+        pnl_html = f'<span style="color:{pnl_color};font-weight:700">{pnl_str}</span>' if pnl_str else ''
+        html += f'''
+                <div class="trade-row">
+                            <div style="display:flex;align-items:center;gap:10px">
+                                            <div style="width:10px;height:10px;border-radius:50%;background:{dot_color};flex-shrink:0"></div>
+                                                            <span class="trade-ticker">{label}</span>
+                                                                        </div>
+                                                                                    {pnl_html}
+                                                                                            </div>'''
+    return html
+
+def _analyst_card(analyst, trades):
+        name = DISPLAY_NAMES.get(analyst, analyst)
+    emoji = EMOJIS.get(analyst, '👤')
+    if trades:
+                rows = _trade_rows(trades)
+else:
+        rows = '<div class="no-trades">No trades</div>'
+    return f'''
+        <div class="card">
+                <div class="analyst-header">
+                            <span class="analyst-emoji">{emoji}</span>
+                                        <span class="analyst-name">{name}</span>
+                                                </div>
+                                                        {rows}
+                                                            </div>'''
 
 def build_graphic(trades: list, trade_date: str) -> bytes:
-    by_analyst = {}
+        by_analyst = {}
     for t in trades:
-        a = t.get('analyst', 'unknown')
+                a = t.get('analyst', 'unknown')
         by_analyst.setdefault(a, []).append(t)
 
-    FIFI_GROUP    = ['fifi']
-    ANALYST_GROUP = ['clark', 'braamski']
-    TRUSTED_GROUP = ['tony', 'zeph', 'vinny', 'bigmac']
-
-    # Best trade = highest pnl%
+    # Best trade
     best_trade = None
-    best_pct   = -9999
+    best_pct = -9999
     for t in trades:
-        pnl_raw = t.get('pnl') or ''
+                pnl_raw = t.get('pnl') or t.get('pnl_pct') or ''
         try:
-            pct = float(str(pnl_raw).replace('%','').replace('+',''))
-            if pct > best_pct:
-                best_pct   = pct
-                best_trade = t
+                        pct = float(str(pnl_raw).replace('%', '').replace('+', ''))
+                        if pct > best_pct:
+                                            best_pct = pct
+                                            best_trade = t
         except Exception:
             pass
 
-    ROW_H            = 34
-    CARD_PAD         = 12
-    HEADER_H         = 88
-    HERO_H           = 90
-    SECTION_H        = 26
-    ANALYST_HEADER_H = 36
-    FOOTER_H         = 44
-
-    DISPLAY_NAMES = {
-        'fifi':     'BadGirlFiFi',
-        'clark':    'clark kent',
-        'braamski': 'Braamskis',
-        'tony':     'TonyD',
-        'zeph':     'ZephTrades',
-        'vinny':    'Vinny',
-        'bigmac':   'BigMac',
-    }
-
-    def card_h(analyst):
-        rows = max(len(by_analyst.get(analyst, [])), 1)
-        return ANALYST_HEADER_H + rows * ROW_H + CARD_PAD
-
-    SECTIONS = [
-        ("FIFI'S PLAYGROUND", FIFI_GROUP),
-        ('ANALYSTS',          ANALYST_GROUP),
-        ('TRUSTED TRADERS',   TRUSTED_GROUP),
-    ]
-
-    total_h = HEADER_H + 12 + HERO_H + 16
-    for _, group in SECTIONS:
-        total_h += SECTION_H + 6
-        for a in group:
-            total_h += card_h(a) + 10
-    total_h += FOOTER_H + 10
-
-    img  = Image.new('RGB', (W, total_h), BG)
-    draw = ImageDraw.Draw(img)
-
-    f_title  = _font(28, bold=True)
-    f_sub    = _font(13)
-    f_date_l = _font(11)
-    f_date   = _font(16, bold=True)
-    f_sec    = _font(11)
-    f_hero_l = _font(10)
-    f_hero_t = _font(32, bold=True)
-    f_hero_p = _font(28, bold=True)
-    f_hero_u = _font(12)
-    f_aname  = _font(16, bold=True)
-    f_ticker = _font(14)
-    f_pct    = _font(14, bold=True)
-    f_footer = _font(12)
-
-    y = 0
-
-    # Header
-    draw.rectangle([(0, 0), (W, HEADER_H)], fill=BG)
-    draw.rounded_rectangle([(SIDE_PAD, 18), (SIDE_PAD + 36, 54)], radius=6, fill=(60, 50, 20))
-    draw.text((SIDE_PAD + 11, 26), 'TQ', font=_font(14, bold=True), fill=GOLD)
-    draw.text((SIDE_PAD + 46, 14), "FiFi's TQE", font=f_title, fill=GOLD)
-    draw.text((SIDE_PAD + 47, 50), 'Daily Trade Recap', font=f_sub, fill=TAN)
-    draw.text((W - 160, 14), 'DATE', font=f_date_l, fill=TAN)
+    # Format date
     try:
-        from datetime import datetime
-        d = datetime.strptime(trade_date, '%Y-%m-%d')
-        date_str = d.strftime('%a, %b %-d, %Y')
-    except Exception:
-        date_str = trade_date
-    draw.text((W - 160, 28), date_str, font=f_date, fill=WHITE)
-    y = HEADER_H
-    draw.line([(0, y), (W, y)], fill=BORDER, width=2)
-    y += 10
+                dt = datetime.strptime(trade_date, '%Y-%m-%d')
+        date_display = dt.strftime('%a, %b %-d, %Y')
+except Exception:
+        date_display = trade_date
 
-    # Hero box
-    hx0, hx1 = SIDE_PAD, W - SIDE_PAD
-    draw.rounded_rectangle([(hx0, y), (hx1, y + HERO_H)], radius=6, fill=HERO_BG, outline=BORDER, width=2)
-    draw.text((hx0 + 12, y + 8), 'TRADE OF THE DAY', font=f_hero_l, fill=TAN)
+    # Hero section
     if best_trade:
-        tk = '$' + (best_trade.get('ticker') or 'N/A').upper()
-        an = DISPLAY_NAMES.get(best_trade.get('analyst',''), best_trade.get('analyst','').capitalize())
-        pnl_s, pnl_c = _pnl_color_str(best_trade.get('pnl'))
-        draw.text((hx0 + 36, y + 22), tk, font=f_hero_t, fill=GOLD)
-        pw = int(f_hero_p.getlength(pnl_s))
-        draw.text((hx1 - pw - 14, y + 28), pnl_s, font=f_hero_p, fill=pnl_c)
-        draw.text((hx0 + 38, y + 66), an, font=f_hero_u, fill=GREY)
-    else:
-        draw.text((hx0 + 12, y + 35), 'No trades today', font=f_aname, fill=GREY)
-    y += HERO_H + 16
+                bt_analyst = best_trade.get('analyst', '')
+        bt_ticker = best_trade.get('ticker', '')
+        bt_strike = best_trade.get('strike', '')
+        bt_expiry = best_trade.get('expiry', '')
+        bt_pnl, _ = _pnl_str(best_trade.get('pnl') or best_trade.get('pnl_pct') or '')
+        bt_name = DISPLAY_NAMES.get(bt_analyst, bt_analyst)
+        bt_emoji = EMOJIS.get(bt_analyst, '👤')
+        bt_label = f'${bt_ticker}'
+        hero_html = f'''
+                <div class="hero">
+                            <div class="hero-label">TRADE OF THE DAY</div>
+                                        <div class="hero-main">
+                                                        <div class="hero-ticker">🎉 ${bt_ticker}</div>
+                                                                        <div class="hero-pnl">{bt_pnl}</div>
+                                                                                    </div>
+                                                                                                <div class="hero-analyst">{bt_emoji} {bt_name}</div>
+                                                                                                        </div>'''
+else:
+        hero_html = ''
 
-    # Analyst card
-    def draw_card(analyst, y_start):
-        trades_list = by_analyst.get(analyst, [])
-        rows = max(len(trades_list), 1)
-        ch = ANALYST_HEADER_H + rows * ROW_H + CARD_PAD
-        cx0, cx1 = SIDE_PAD, W - SIDE_PAD
-        draw.rounded_rectangle([(cx0, y_start), (cx1, y_start + ch)], radius=6, fill=CARD_BG, outline=BORDER, width=1)
-        display = DISPLAY_NAMES.get(analyst, analyst.capitalize())
-        draw.text((cx0 + 10, y_start + 10), display, font=f_aname, fill=WHITE)
-        draw.line([(cx0 + 8, y_start + ANALYST_HEADER_H - 2), (cx1 - 8, y_start + ANALYST_HEADER_H - 2)], fill=ACCENT_LINE, width=1)
-        ry = y_start + ANALYST_HEADER_H
-        if not trades_list:
-            draw.text((cx0 + 12, ry + 8), 'No trades', font=f_ticker, fill=GREY)
-        else:
-            for t in trades_list:
-                pnl_raw  = t.get('pnl') or ''
-                pnl_s, pnl_c = _pnl_color_str(pnl_raw)
-                ticker_s = '$' + (t.get('ticker') or '---').upper()
-                strike_s = t.get('strike') or ''
-                expiry_s = t.get('expiry') or ''
-                detail   = ticker_s
-                if strike_s: detail += '  ' + strike_s
-                if expiry_s: detail += '  ' + expiry_s
-                status    = t.get('status', '')
-                dot_color = GREEN if status == 'Closed' else RED
-                dx, dy = cx0 + 14, ry + ROW_H // 2 - 5
-                draw.ellipse([(dx, dy), (dx + 10, dy + 10)], fill=dot_color)
-                draw.text((cx0 + 30, ry + 8), detail, font=f_ticker, fill=WHITE)
-                if pnl_s:
-                    pw2 = int(f_pct.getlength(pnl_s))
-                    draw.text((cx1 - pw2 - 12, ry + 8), pnl_s, font=f_pct, fill=pnl_c)
-                ry += ROW_H
-        return ch
-
-    for sec_name, group in SECTIONS:
-        _section_label(draw, y, sec_name, f_sec)
-        y += SECTION_H + 4
+    # Sections
+    sections_html = ''
+    for section_name, group in [("FIFI'S PLAYGROUND", FIFI_GROUP), ('ANALYSTS', ANALYST_GROUP), ('TRUSTED TRADERS', TRUSTED_GROUP)]:
+                cards_html = ''
         for analyst in group:
-            ch = draw_card(analyst, y)
-            y += ch + 10
+                        analyst_trades = by_analyst.get(analyst, [])
+                        cards_html += _analyst_card(analyst, analyst_trades)
+                    sections_html += f'''
+                            <div class="section-label">{section_name}</div>
+                                    {cards_html}'''
 
-    y += 6
+    html = f'''<!DOCTYPE html>
+    <html>
+    <head>
+    <meta charset="UTF-8">
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Inter:wght@400;700&display=swap');
+        * {{ margin:0; padding:0; box-sizing:border-box; }}
+          body {{
+              background: #0f0e08;
+                  font-family: 'Share Tech Mono', 'Courier New', monospace;
+                      color: #e8e4d0;
+                          padding: 24px;
+                              width: 800px;
+                                }}
+                                  .wrapper {{
+                                      background: #161510;
+                                          border: 1px solid #b8860b44;
+                                              border-radius: 12px;
+                                                  padding: 28px;
+                                                    }}
+                                                      .header {{
+                                                          display: flex;
+                                                              align-items: center;
+                                                                  justify-content: space-between;
+                                                                      margin-bottom: 20px;
+                                                                          padding-bottom: 20px;
+                                                                              border-bottom: 1px solid #b8860b33;
+                                                                                }}
+                                                                                  .header-left {{ display:flex; align-items:center; gap:14px; }}
+                                                                                    .logo {{
+                                                                                        width: 52px; height: 52px;
+                                                                                            background: #b8860b22;
+                                                                                                border: 1px solid #b8860b66;
+                                                                                                    border-radius: 8px;
+                                                                                                        display: flex; align-items: center; justify-content: center;
+                                                                                                            font-size: 24px;
+                                                                                                              }}
+                                                                                                                .brand-name {{
+                                                                                                                    font-size: 22px; font-weight: 700;
+                                                                                                                        color: #d4a017;
+                                                                                                                            letter-spacing: 1px;
+                                                                                                                              }}
+                                                                                                                                .brand-sub {{ font-size: 12px; color: #8a7a50; margin-top: 2px; }}
+                                                                                                                                  .header-right {{ text-align: right; }}
+                                                                                                                                    .date-label {{ font-size: 10px; color: #8a7a50; letter-spacing: 2px; }}
+                                                                                                                                      .date-value {{ font-size: 18px; color: #d4a017; font-weight: 700; margin-top: 4px; }}
+                                                                                                                                        .hero {{
+                                                                                                                                            background: #1e1b0e;
+                                                                                                                                                border: 1px solid #b8860b55;
+                                                                                                                                                    border-radius: 10px;
+                                                                                                                                                        padding: 18px 22px;
+                                                                                                                                                            margin-bottom: 24px;
+                                                                                                                                                              }}
+                                                                                                                                                                .hero-label {{ font-size: 10px; color: #8a7a50; letter-spacing: 3px; margin-bottom: 10px; }}
+                                                                                                                                                                  .hero-main {{ display:flex; align-items:center; justify-content:space-between; }}
+                                                                                                                                                                    .hero-ticker {{ font-size: 30px; font-weight: 700; color: #d4a017; }}
+                                                                                                                                                                      .hero-pnl {{ font-size: 36px; font-weight: 700; color: #4ade80; }}
+                                                                                                                                                                        .hero-analyst {{ font-size: 13px; color: #8a7a50; margin-top: 8px; }}
+                                                                                                                                                                          .section-label {{
+                                                                                                                                                                              font-size: 10px; color: #8a7a50;
+                                                                                                                                                                                  letter-spacing: 3px;
+                                                                                                                                                                                      margin: 20px 0 10px 0;
+                                                                                                                                                                                          display: flex; align-items: center; gap: 10px;
+                                                                                                                                                                                            }}
+                                                                                                                                                                                              .section-label::after {{
+                                                                                                                                                                                                  content: '';
+                                                                                                                                                                                                      flex: 1;
+                                                                                                                                                                                                          height: 1px;
+                                                                                                                                                                                                              background: #b8860b33;
+                                                                                                                                                                                                                }}
+                                                                                                                                                                                                                  .card {{
+                                                                                                                                                                                                                      background: #1a1810;
+                                                                                                                                                                                                                          border: 1px solid #b8860b33;
+                                                                                                                                                                                                                              border-radius: 8px;
+                                                                                                                                                                                                                                  margin-bottom: 8px;
+                                                                                                                                                                                                                                      overflow: hidden;
+                                                                                                                                                                                                                                        }}
+                                                                                                                                                                                                                                          .analyst-header {{
+                                                                                                                                                                                                                                              display: flex; align-items: center; gap: 10px;
+                                                                                                                                                                                                                                                  padding: 12px 16px;
+                                                                                                                                                                                                                                                      border-bottom: 1px solid #b8860b22;
+                                                                                                                                                                                                                                                        }}
+                                                                                                                                                                                                                                                          .analyst-emoji {{ font-size: 20px; }}
+                                                                                                                                                                                                                                                            .analyst-name {{ font-size: 16px; font-weight: 700; color: #d4a017; }}
+                                                                                                                                                                                                                                                              .trade-row {{
+                                                                                                                                                                                                                                                                  display: flex; align-items: center; justify-content: space-between;
+                                                                                                                                                                                                                                                                      padding: 9px 16px;
+                                                                                                                                                                                                                                                                          border-bottom: 1px solid #b8860b11;
+                                                                                                                                                                                                                                                                            }}
+                                                                                                                                                                                                                                                                              .trade-row:last-child {{ border-bottom: none; }}
+                                                                                                                                                                                                                                                                                .trade-ticker {{ font-size: 14px; color: #c8bfa0; }}
+                                                                                                                                                                                                                                                                                  .no-trades {{ padding: 10px 16px; font-size: 13px; color: #5a5040; font-style: italic; }}
+                                                                                                                                                                                                                                                                                    .footer {{
+                                                                                                                                                                                                                                                                                        display: flex; justify-content: space-between;
+                                                                                                                                                                                                                                                                                            margin-top: 24px; padding-top: 16px;
+                                                                                                                                                                                                                                                                                                border-top: 1px solid #b8860b22;
+                                                                                                                                                                                                                                                                                                    font-size: 11px; color: #5a5040;
+                                                                                                                                                                                                                                                                                                      }}
+                                                                                                                                                                                                                                                                                                      </style>
+                                                                                                                                                                                                                                                                                                      </head>
+                                                                                                                                                                                                                                                                                                      <body>
+                                                                                                                                                                                                                                                                                                      <div class="wrapper">
+                                                                                                                                                                                                                                                                                                        <div class="header">
+                                                                                                                                                                                                                                                                                                            <div class="header-left">
+                                                                                                                                                                                                                                                                                                                  <div class="logo">🏆</div>
+                                                                                                                                                                                                                                                                                                                        <div>
+                                                                                                                                                                                                                                                                                                                                <div class="brand-name">FiFi's TQE</div>
+                                                                                                                                                                                                                                                                                                                                        <div class="brand-sub">Daily Trade Recap</div>
+                                                                                                                                                                                                                                                                                                                                              </div>
+                                                                                                                                                                                                                                                                                                                                                  </div>
+                                                                                                                                                                                                                                                                                                                                                      <div class="header-right">
+                                                                                                                                                                                                                                                                                                                                                            <div class="date-label">DATE</div>
+                                                                                                                                                                                                                                                                                                                                                                  <div class="date-value">{date_display}</div>
+                                                                                                                                                                                                                                                                                                                                                                      </div>
+                                                                                                                                                                                                                                                                                                                                                                        </div>
+                                                                                                                                                                                                                                                                                                                                                                          {hero_html}
+                                                                                                                                                                                                                                                                                                                                                                            {sections_html}
+                                                                                                                                                                                                                                                                                                                                                                              <div class="footer">
+                                                                                                                                                                                                                                                                                                                                                                                  <span>𝕏 x.com/badgirlfifi_tqe</span>
+                                                                                                                                                                                                                                                                                                                                                                                      <span>▶ @Badgirlfifi_trading</span>
+                                                                                                                                                                                                                                                                                                                                                                                        </div>
+                                                                                                                                                                                                                                                                                                                                                                                        </div>
+                                                                                                                                                                                                                                                                                                                                                                                        </body>
+                                                                                                                                                                                                                                                                                                                                                                                        </html>'''
 
-    # Footer
-    draw.line([(0, y), (W, y)], fill=ACCENT_LINE, width=1)
-    y += 8
-    draw.text((SIDE_PAD, y + 8), 'x.com/badgirlfifi_tqe', font=f_footer, fill=GREY)
-    fr  = '@Badgirlfi_trading'
-    frw = int(f_footer.getlength(fr))
-    draw.text((W - SIDE_PAD - frw, y + 8), fr, font=f_footer, fill=GREY)
+    with sync_playwright() as p:
+                browser = p.chromium.launch()
+        page = browser.new_page(viewport={'width': 800, 'height': 600})
+        page.set_content(html, wait_until='networkidle')
+        wrapper = page.query_selector('.wrapper')
+        img_bytes = wrapper.screenshot()
+        browser.close()
 
-    buf = io.BytesIO()
-    img.save(buf, format='PNG')
-    return buf.getvalue()
+    return img_bytes
