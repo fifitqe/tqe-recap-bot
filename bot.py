@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 from config import DISCORD_TOKEN, CHANNEL_ID_TO_ANALYST
 from parser import route_message
-from database import upsert_trade, insert_event
+from database import log_trade
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -13,27 +13,39 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready():
-    print(f"[Bot] Online as {bot.user}")
-    print(f"[Bot] Watching {len(CHANNEL_ID_TO_ANALYST)} channels")
+        print(f"[Bot] Online as {bot.user}")
+        print(f"[Bot] Watching {len(CHANNEL_ID_TO_ANALYST)} channels")
 
 @bot.event
 async def on_message(message: discord.Message):
-    analyst = CHANNEL_ID_TO_ANALYST.get(message.channel.id)
-    if not analyst:
-        return
-    if message.author.bot and analyst != "bigmac":
-        return
-    result = route_message(analyst, message)
+        analyst = CHANNEL_ID_TO_ANALYST.get(message.channel.id)
+        if not analyst:
+                    return
+                if message.author.bot and analyst != "bigmac":
+                            return
+                        result = route_message(analyst, message)
     if not result:
-        await bot.process_commands(message)
-        return
-    event_type  = result.pop("event_type", "entry")
-    posted_at   = message.created_at.isoformat()
-    raw_msg     = (message.content or "")[:500]
-    if event_type == "entry":
-        upsert_trade({**result, "analyst": analyst, "channel_id": str(message.channel.id), "message_id": str(message.id), "posted_at": posted_at, "raw_message": raw_msg})
-        print(f"[Bot] Entry: {result.get('ticker')} | {analyst}")
-    elif event_type in ("exit", "trim"):
-        insert_event({**result, "analyst": analyst, "channel_id": str(message.channel.id), "message_id": str(message.id), "event_type": event_type, "posted_at": posted_at, "raw_message": raw_msg})
-        print(f"[Bot] {event_type.capitalize()}: {analyst}")
+                await bot.process_commands(message)
+                return
+            action     = result.get("action", "entry")
+    ticker     = result.get("ticker", "")
+    strike     = result.get("strike")
+    expiry     = result.get("expiry")
+    price      = result.get("price")
+    status     = "Trimmed" if action == "trim" else ("Closed" if action == "exit" else "Open")
+    raw_text   = (message.content or "")[:500]
+    message_id = str(message.id)
+    log_trade(
+                analyst=analyst,
+                channel_id=message.channel.id,
+                ticker=ticker,
+                action=action,
+                strike=strike,
+                expiry=expiry,
+                price=price,
+                status=status,
+                raw_text=raw_text,
+                message_id=message_id,
+    )
+    print(f"[Bot] {action.upper()} {ticker} | {analyst}")
     await bot.process_commands(message)
